@@ -1,4 +1,5 @@
 import abc
+import asyncio
 from typing import Coroutine, Any
 
 """
@@ -8,14 +9,14 @@ from typing import Coroutine, Any
         - возможность планирования новой задачи
         - отслеживание состояния завершенных задач (сохранение результатов их выполнения)
         - отмену незавершенных задач перед остановкой работы планировщика
-        
+
     Ниже представлен интерфейс, которому должна соответствовать ваша реализация.
-    
+
     Обратите внимание, что перед завершением работы планировщика, все запущенные им корутины должны быть
     корректным образом завершены.
-    
+
     В папке tests вы найдете тесты, с помощью которых мы будем проверять работоспособность вашей реализации
-    
+
 """
 
 
@@ -38,8 +39,8 @@ class AbstractRegistrator(abc.ABC):
 
 class AbstractWatcher(abc.ABC):
     """
-    Абстрактный интерфейс, которому должна соответсововать ваша реализация Watcher.
-    При тестировании мы расчитываем на то, что этот интерфейс будет соблюден.
+    Абстрактный интерфейс, которому должна соответствовать ваша реализация Watcher.
+    При тестировании мы рассчитываем на то, что этот интерфейс будет соблюден.
     """
 
     def __init__(self, registrator: AbstractRegistrator):
@@ -62,19 +63,38 @@ class AbstractWatcher(abc.ABC):
 
 
 class StudentWatcher(AbstractWatcher):
-    def __init__(self, registrator: AbstractRegistrator):
+    def __init__(self, registrator: AbstractRegistrator, ttl=10):
         super().__init__(registrator)
-        # Your code goes here
-        ...
+        self.registrator = registrator
+        # список активных задач
+        self.active_tasks = []
+        # время на жизнь задачи (по дефолту 10 секунд)
+        self.ttl = ttl
 
     async def start(self) -> None:
-        # Your code goes here
-        ...
+        for task in self.active_tasks:
+            task.cancel()
+            self.delete_from_tasks(task)
+
+    def delete_from_tasks(self, task):
+        try:
+            self.active_tasks.remove(task)
+        except:
+            pass
 
     async def stop(self) -> None:
-        # Your code goes here
-        ...
+        done, pending = await asyncio.wait(self.active_tasks, timeout=self.ttl)
+        for task in done:
+            try:
+                self.registrator.register_value(task.result())
+            except Exception as error:
+                self.registrator.register_error(error)
+            self.delete_from_tasks(task)
+
+        for task in pending:
+            task.cancel()
+            self.delete_from_tasks(task)
 
     def start_and_watch(self, coro: Coroutine) -> None:
-        # Your code goes here
-        ...
+        new_task = asyncio.create_task(coro)
+        self.active_tasks.append(new_task)
